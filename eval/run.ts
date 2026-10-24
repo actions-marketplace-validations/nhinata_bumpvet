@@ -7,10 +7,10 @@
  *
  *   npm run eval [-- --per-package 10] [--baseline 5]
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { slim, type RawPackument } from '../src/registry.js';
+import { slim } from '../src/registry.js';
 import { computeSignals } from '../src/signals.js';
 import { decide } from '../src/verdict.js';
 import type { Packument, SignalId, Verdict } from '../src/types.js';
@@ -30,16 +30,16 @@ const DELAYS = [
 
 async function load(name: string): Promise<Packument> {
   const file = join(CACHE, name.replace('/', '__') + '.json');
-  try {
-    return slim(JSON.parse(readFileSync(file, 'utf8')) as RawPackument);
-  } catch {
-    const res = await fetch('https://registry.npmjs.org/' + name.replace('/', '%2f'));
-    if (!res.ok) throw new Error(`${name}: ${res.status}`);
-    const text = await res.text();
-    mkdirSync(CACHE, { recursive: true });
-    writeFileSync(file, text);
-    return slim(JSON.parse(text) as RawPackument);
-  }
+  if (existsSync(file)) return slim(JSON.parse(readFileSync(file, 'utf8')), name);
+  const res = await fetch('https://registry.npmjs.org/' + name.replace('/', '%2f'));
+  if (!res.ok) throw new Error(`${name}: ${res.status}`);
+  const text = await res.text();
+  const packument = slim(JSON.parse(text), name); // check it before caching it
+  mkdirSync(CACHE, { recursive: true });
+  // Write and rename, so an interrupted run never leaves half a file in the cache.
+  writeFileSync(`${file}.tmp`, text);
+  renameSync(`${file}.tmp`, file);
+  return packument;
 }
 
 const isStable = (v: string) => /^\d+\.\d+\.\d+$/.test(v);

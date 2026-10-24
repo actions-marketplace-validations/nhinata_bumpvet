@@ -1,59 +1,96 @@
+import { isObject, str } from './json.js';
 import type { Change } from './types.js';
 
 const REGISTRY = 'https://registry.npmjs.org/';
 
-interface LockEntry {
-  name?: string;
-  version?: string;
-  resolved?: string;
-  integrity?: string;
-  link?: boolean;
-  inBundle?: boolean;
+/**
+ * A package name bumpvet can look up: an optional `@scope/` and a name, each
+ * a segment that URL encoding leaves alone (so no `%`, `#`, `?`, `\\` or `/`)
+ * and that does not start with "." (no path tricks). The name goes into the
+ * registry URL as it is.
+ */
+function validName(name: string): boolean {
+  const segments = name.startsWith('@') ? name.slice(1).split('/') : [name];
+  if (segments.length !== (name.startsWith('@') ? 2 : 1)) return false;
+  return segments.every((s) => s !== '' && !s.startsWith('.') && encodeURIComponent(s) === s);
+}
+
+/**
+ * Where an entry comes from, when that is not the public registry. A registry
+ * URL is not judged here: whether it is the right tarball is checked against
+ * the registry itself (see `tarball-mismatch` in signals.ts).
+ */
+function elsewhere(name: string, resolved?: string, integrity?: string): string | undefined {
+  if (!validName(name)) return `invalid package name ${JSON.stringify(name)}`;
+  // npm leaves `resolved` out for registry packages with omit-lockfile-registry-resolved.
+  if (resolved === undefined) return integrity ? undefined : 'unknown source';
+  if (!resolved.startsWith(REGISTRY)) return resolved || 'unknown source';
+  return undefined;
 }
 
 export interface LockPackage {
   name: string;
   version: string;
   integrity?: string;
-  /** Where the package comes from when that is not the public registry (git, file:, another registry). */
+  /** The URL the lockfile records, whatever the source. */
+  resolved?: string;
+  /** Set when the package does not come from the public registry: what it comes from instead. */
   elsewhere?: string;
 }
 
 /**
  * Reads the installed packages of a package-lock.json (lockfileVersion 2 or 3).
  * Workspace links and bundled dependencies are left out: they are not
- * downloaded on their own.
+ * downloaded on their own. The text may come from a pull request, so every
+ * field is checked for its type; `label` names the file in errors.
  */
-export function parseLockfile(text: string): Map<string, LockPackage> {
-  const lock = JSON.parse(text) as {
-    lockfileVersion?: number;
-    packages?: Record<string, LockEntry>;
-  };
-  if (!lock.packages || (lock.lockfileVersion ?? 0) < 2) {
-    throw new Error('only package-lock.json with lockfileVersion 2 or 3 is supported');
+export function parseLockfile(text: string, label = 'lockfile'): Map<string, LockPackage> {
+  let lock: unknown;
+  try {
+    lock = JSON.parse(text);
+  } catch (err) {
+    throw new Error(`${label} is not valid JSON`, { cause: err });
+  }
+  if (
+    !isObject(lock) ||
+    !isObject(lock.packages) ||
+    (lock.lockfileVersion !== 2 && lock.lockfileVersion !== 3)
+  ) {
+    throw new Error(`${label}: only package-lock.json with lockfileVersion 2 or 3 is supported`);
   }
   const out = new Map<string, LockPackage>();
   for (const [path, entry] of Object.entries(lock.packages)) {
-    if (!path.includes('node_modules/') || entry.link || entry.inBundle || !entry.version) continue;
+    if (!path.includes('node_modules/') || !isObject(entry)) continue;
+    const version = str(entry.version);
+    if (entry.link === true || entry.inBundle === true || !version) continue;
     const name =
-      entry.name ?? path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length);
-    // npm leaves `resolved` out for registry packages with omit-lockfile-registry-resolved.
-    const fromRegistry = entry.resolved ? entry.resolved.startsWith(REGISTRY) : !!entry.integrity;
+      str(entry.name) || path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length);
+    const resolved = str(entry.resolved);
+    const integrity = str(entry.integrity);
     out.set(path, {
       name,
-      version: entry.version,
-      integrity: entry.integrity,
-      elsewhere: fromRegistry ? undefined : (entry.resolved ?? 'unknown source'),
+      version,
+      integrity,
+      resolved: resolved || undefined,
+      elsewhere: elsewhere(name, resolved, integrity),
     });
   }
   return out;
 }
 
-/** True when two entries of the same version would install the same thing. */
-function sameArtifact(a: LockPackage, b: LockPackage): boolean {
-  return (
-    a.elsewhere === b.elsewhere && (!a.integrity || !b.integrity || a.integrity === b.integrity)
-  );
+/**
+ * What an entry installs, as a key: two entries of the same package and
+ * version install the same thing exactly when their keys are equal. With an
+ * integrity, npm checks the content against it, so the integrity identifies
+ * the artifact whatever `resolved` says; without one, only the URL does. A
+ * field one side has and the other lacks therefore makes the keys differ.
+ * This is the one place that decides it.
+ */
+function artifactKey(p: LockPackage): string {
+  return JSON.stringify([
+    p.elsewhere,
+    p.integrity ? `integrity:${p.integrity}` : `url:${p.resolved ?? ''}`,
+  ]);
 }
 
 /**
@@ -62,13 +99,15 @@ function sameArtifact(a: LockPackage, b: LockPackage): boolean {
  * source or with another integrity was not.
  */
 export function diffLockfiles(oldText: string | null, newText: string): Change[] {
-  const before = oldText === null ? new Map<string, LockPackage>() : parseLockfile(oldText);
+  const before =
+    oldText === null ? new Map<string, LockPackage>() : parseLockfile(oldText, 'the old lockfile');
   const old = [...before.values()];
   const seen = new Set<string>();
   const changes: Change[] = [];
-  for (const [path, pkg] of parseLockfile(newText)) {
+  for (const [path, pkg] of parseLockfile(newText, 'the new lockfile')) {
     const sameVersion = old.filter((p) => p.name === pkg.name && p.version === pkg.version);
-    if (sameVersion.some((p) => sameArtifact(p, pkg))) continue;
+    const artifact = artifactKey(pkg);
+    if (sameVersion.some((p) => artifactKey(p) === artifact)) continue;
 
     const atPath = before.get(path);
     const prev =
@@ -79,6 +118,7 @@ export function diffLockfiles(oldText: string | null, newText: string): Change[]
       to: pkg.version,
       integrity: pkg.integrity,
     };
+    if (pkg.resolved) change.resolved = pkg.resolved;
     if (pkg.elsewhere) change.source = pkg.elsewhere;
     if (prev?.elsewhere) change.fromSource = prev.elsewhere;
     if (
@@ -92,7 +132,7 @@ export function diffLockfiles(oldText: string | null, newText: string): Change[]
     }
 
     // What gets vetted is the new artifact; it is listed once, against the first version it replaces.
-    const key = JSON.stringify([change.name, change.to, change.source, change.integrity]);
+    const key = JSON.stringify([change.name, change.to, artifact]);
     if (seen.has(key)) continue;
     seen.add(key);
     changes.push(change);

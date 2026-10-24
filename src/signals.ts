@@ -46,7 +46,7 @@ export function computeSignals(
     });
   }
 
-  const next = packument?.versions[change.to];
+  const next = packument ? own(packument.versions, change.to) : undefined;
   if (!packument || !next) {
     return [
       ...signals,
@@ -59,13 +59,18 @@ export function computeSignals(
     ];
   }
 
-  const expected = next.dist?.integrity;
+  // The registry's hash in the lockfile's algorithm: sha512 usually, sha1 for old lockfiles,
+  // which the registry gives as `shasum` (and, for some old versions, as `integrity`).
+  const expected = change.integrity?.startsWith('sha1-')
+    ? (sha1Integrity(next.dist?.shasum) ?? next.dist?.integrity)
+    : next.dist?.integrity;
+  const comparable = !!change.integrity && !!expected && sameAlgorithm(change.integrity, expected);
   // One integrity signal is enough; the lockfile-to-lockfile one above is the more direct.
   if (
     !signals.length &&
+    comparable &&
     change.integrity &&
     expected &&
-    sameAlgorithm(change.integrity, expected) &&
     change.integrity !== expected
   ) {
     signals.push({
@@ -75,10 +80,24 @@ export function computeSignals(
       after: change.integrity,
     });
   }
+  // npm checks what it downloads against the lockfile's integrity, so a matching
+  // integrity pins the content whatever `resolved` says. Without one it checks
+  // nothing: `resolved` must then be exactly the registry's tarball for this
+  // version, or npm installs whatever it points at.
+  // A registry that gives no tarball URL leaves nothing to vouch for `resolved`: that fails too.
+  const tarball = next.dist?.tarball;
+  if (!comparable && change.resolved !== undefined && change.resolved !== tarball) {
+    signals.push({
+      id: 'tarball-mismatch',
+      group: 'tamper',
+      before: tarball ?? 'no tarball URL in the registry',
+      after: change.resolved,
+    });
+  }
 
   const earlier = versionsBefore(packument, change.to);
   const reference =
-    (change.from !== null ? packument.versions[change.from] : undefined) ?? earlier.at(-1);
+    (change.from !== null ? own(packument.versions, change.from) : undefined) ?? earlier.at(-1);
 
   const publisher = next._npmUser?.name;
   const usual = new Set(
@@ -107,7 +126,7 @@ export function computeSignals(
     });
   }
 
-  const published = packument.time[change.to];
+  const published = own(packument.time, change.to);
   if (published) {
     const hours = (now.getTime() - Date.parse(published)) / 3_600_000;
     if (hours >= 0 && hours < freshHours) {
@@ -140,12 +159,16 @@ export function computeSignals(
 
 /** Versions published before `version`, oldest first. */
 function versionsBefore(packument: Packument, version: string): VersionManifest[] {
-  const cutoff = packument.time[version];
+  const cutoff = own(packument.time, version);
   if (!cutoff) return [];
   return Object.entries(packument.time)
-    .filter(([v, t]) => v !== 'created' && v !== 'modified' && t < cutoff && packument.versions[v])
+    .filter(([, t]) => t < cutoff)
     .sort((a, b) => a[1].localeCompare(b[1]))
-    .map(([v]) => packument.versions[v]!);
+    .flatMap(([v]) => {
+      // `created`, `modified` and removed versions have a time but no manifest.
+      const m = own(packument.versions, v);
+      return m ? [m] : [];
+    });
 }
 
 function sameAlgorithm(a: string, b: string): boolean {
@@ -154,4 +177,19 @@ function sameAlgorithm(a: string, b: string): boolean {
 
 function formatAge(hours: number): string {
   return hours < 1 ? `${Math.round(hours * 60)}m` : `${Math.round(hours)}h`;
+}
+
+/**
+ * An entry the map itself holds. Keys come from lockfiles and the registry, so
+ * a plain index would also find inherited members: `versions['constructor']`.
+ */
+function own<T>(map: Record<string, T>, key: string): T | undefined {
+  return Object.hasOwn(map, key) ? map[key] : undefined;
+}
+
+/** The registry's hex `shasum` as an integrity string (`sha1-<base64>`). */
+function sha1Integrity(shasum: string | undefined): string | undefined {
+  return shasum && /^[0-9a-f]{40}$/i.test(shasum)
+    ? `sha1-${Buffer.from(shasum, 'hex').toString('base64')}`
+    : undefined;
 }

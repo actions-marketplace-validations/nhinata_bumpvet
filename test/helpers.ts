@@ -27,6 +27,7 @@ export function packument(name: string, versions: FakeVersion[]): Packument {
       scripts: v.scripts,
       dist: {
         integrity: v.integrity ?? `sha512-${name}-${v.version}`,
+        tarball: `https://registry.npmjs.org/${name}/-/x-${v.version}.tgz`,
         attestations: v.provenance ? { url: 'x' } : undefined,
       },
     };
@@ -43,13 +44,19 @@ export function fakeRegistry(...packuments: Packument[]): FetchPackument {
 export function lockfile(
   packages: Record<
     string,
-    { version: string; integrity?: string; resolved?: string; link?: boolean }
+    { version: string; name?: string; integrity?: string; resolved?: string; link?: boolean }
   >,
 ): string {
   const entries: Record<string, unknown> = { '': { name: 'app', version: '1.0.0' } };
   for (const [path, p] of Object.entries(packages)) {
-    const name = path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length);
-    entries[path] = { resolved: `https://registry.npmjs.org/${name}/-/x-${p.version}.tgz`, ...p };
+    // an alias entry (`name` set) is fetched from the aliased package's URL
+    const name = p.name || path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length);
+    entries[path] = {
+      resolved: `https://registry.npmjs.org/${name}/-/x-${p.version}.tgz`,
+      // the same integrity packument() gives the version, as npm would record it
+      integrity: `sha512-${name}-${p.version}`,
+      ...p,
+    };
   }
   return JSON.stringify({ name: 'app', lockfileVersion: 3, packages: entries });
 }

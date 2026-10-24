@@ -1,3 +1,5 @@
+import { messageOf, messageWithCause } from './errors.js';
+import { isObject, str } from './json.js';
 import { INSTALL_HOOKS } from './signals.js';
 import type { Packument, VersionManifest } from './types.js';
 
@@ -13,13 +15,35 @@ export function registryFetcher(
     let p = cache.get(name);
     if (!p) {
       p = (async () => {
-        const res = await fetchImpl(base + name.replace('/', '%2f'), {
-          headers: { accept: 'application/json' },
-          signal: AbortSignal.timeout(60_000),
-        });
+        let res: Response;
+        try {
+          res = await fetchImpl(base + name.replace('/', '%2f'), {
+            headers: { accept: 'application/json' },
+            signal: AbortSignal.timeout(60_000),
+          });
+        } catch (err) {
+          const reason = messageWithCause(err);
+          throw new Error(`fetching ${name} from the registry failed: ${reason}`, { cause: err });
+        }
         if (res.status === 404) return null;
         if (!res.ok) throw new Error(`registry returned ${res.status} for ${name}`);
-        return slim((await res.json()) as RawPackument);
+        // Read first, then parse: a timeout or reset mid-body is not "invalid JSON".
+        let text: string;
+        try {
+          text = await res.text();
+        } catch (err) {
+          const reason = messageOf(err);
+          throw new Error(`reading the registry response for ${name} failed: ${reason}`, {
+            cause: err,
+          });
+        }
+        let json: unknown;
+        try {
+          json = JSON.parse(text);
+        } catch (err) {
+          throw new Error(`registry sent invalid JSON for ${name}`, { cause: err });
+        }
+        return slim(json, name);
       })();
       cache.set(name, p);
     }
@@ -27,36 +51,49 @@ export function registryFetcher(
   };
 }
 
-/** A packument as the registry sends it: none of its fields are guaranteed. */
-export interface RawPackument {
-  name?: string;
-  time?: Record<string, string>;
-  versions?: Record<
-    string,
-    {
-      _npmUser?: { name?: string };
-      scripts?: Record<string, string | undefined>;
-      dist?: { integrity?: string; attestations?: unknown };
-    }
-  >;
-}
-
 /**
- * Keeps only the fields bumpvet reads. Full packuments of large packages are
- * tens of megabytes, and every one stays cached for the whole run.
+ * Keeps only the fields bumpvet reads, and only when they have the type bumpvet
+ * expects: the response comes from the network and nothing in it is
+ * guaranteed. (An unpublished package, for one, has an object in `time`.) Full
+ * packuments of large packages are tens of megabytes, and every one stays
+ * cached for the whole run.
  */
-export function slim(raw: RawPackument): Packument {
-  const versions: Record<string, VersionManifest> = {};
-  for (const [v, m] of Object.entries(raw.versions ?? {})) {
-    const scripts = m.scripts;
-    versions[v] = {
-      version: v,
-      _npmUser: m._npmUser?.name ? { name: m._npmUser.name } : undefined,
-      scripts:
-        scripts &&
-        Object.fromEntries(INSTALL_HOOKS.flatMap((h) => (scripts[h] ? [[h, scripts[h]]] : []))),
-      dist: { integrity: m.dist?.integrity, attestations: m.dist?.attestations ? true : undefined },
-    };
+export function slim(raw: unknown, name: string): Packument {
+  // Anything else (null, an array, `{"error": ...}`) is a broken registry, not a package to block.
+  if (!isObject(raw) || (!isObject(raw.versions) && !isObject(raw.time))) {
+    throw new Error(`registry sent something that is not a packument for ${name}`);
   }
-  return { name: raw.name ?? '', time: raw.time ?? {}, versions };
+  // No prototype: a `__proto__` key from the registry stays an ordinary key.
+  const time = Object.create(null) as Record<string, string>;
+  if (isObject(raw.time)) {
+    for (const [k, v] of Object.entries(raw.time)) if (typeof v === 'string') time[k] = v;
+  }
+  const versions = Object.create(null) as Record<string, VersionManifest>;
+  if (isObject(raw.versions)) {
+    for (const [v, m] of Object.entries(raw.versions)) {
+      if (!isObject(m)) continue;
+      const user = isObject(m._npmUser) ? str(m._npmUser.name) : undefined;
+      const scripts = isObject(m.scripts) ? m.scripts : undefined;
+      const dist = isObject(m.dist) ? m.dist : {};
+      versions[v] = {
+        version: v,
+        _npmUser: user ? { name: user } : undefined,
+        scripts:
+          scripts &&
+          Object.fromEntries(
+            INSTALL_HOOKS.flatMap((h) => {
+              const script = str(scripts[h]);
+              return script ? [[h, script]] : [];
+            }),
+          ),
+        dist: {
+          integrity: str(dist.integrity),
+          shasum: str(dist.shasum),
+          tarball: str(dist.tarball),
+          attestations: dist.attestations ? true : undefined,
+        },
+      };
+    }
+  }
+  return { name: str(raw.name) || name, time, versions };
 }

@@ -214,6 +214,103 @@ describe('computeSignals', () => {
     });
   });
 
+  it.each(['constructor', 'toString', '__proto__'])(
+    'flags version %j, which only an inherited member would match, as not in the registry',
+    (version) => {
+      const p = packument('pkg', history);
+      expect(ids(computeSignals({ name: 'pkg', from: '1.1.0', to: version }, p, { now }))).toEqual([
+        'not-in-registry',
+      ]);
+    },
+  );
+
+  describe('tarball-mismatch', () => {
+    const p = packument('lodash', [
+      ...history,
+      { version: '1.2.0', time: '2025-12-01T00:00:00Z', publisher: 'alice', provenance: true },
+    ]);
+    const canonical = 'https://registry.npmjs.org/lodash/-/x-1.2.0.tgz';
+    const vet = (resolved: string, integrity?: string) =>
+      ids(
+        computeSignals({ name: 'lodash', from: '1.1.0', to: '1.2.0', resolved, integrity }, p, {
+          now,
+        }),
+      );
+
+    it.each([
+      ['another version of the package', 'https://registry.npmjs.org/lodash/-/x-0.1.0.tgz'],
+      ['another package', 'https://registry.npmjs.org/evil/-/evil-1.0.0.tgz'],
+      ['another package through ..', 'https://registry.npmjs.org/lodash/-/../../evil/-/e.tgz'],
+      ['another package through %2f', 'https://registry.npmjs.org/lodash/-/..%2f..%2fevil%2fe.tgz'],
+      [
+        'another package through backslashes',
+        'https://registry.npmjs.org/lodash/-/..\\..\\evil.tgz',
+      ],
+    ])('flags %s when there is no integrity to pin the content', (_, resolved) => {
+      expect(vet(resolved)).toEqual(['tarball-mismatch']);
+    });
+
+    it('flags it when the lockfile integrity cannot be compared (sha1 against sha512)', () => {
+      expect(vet('https://registry.npmjs.org/evil/-/evil-1.0.0.tgz', 'sha1-abc')).toEqual([
+        'tarball-mismatch',
+      ]);
+    });
+
+    it('flags a URL the registry gives nothing to compare with', () => {
+      const bare = packument('lodash', [{ version: '1.2.0', time: '2025-12-01T00:00:00Z' }]);
+      delete bare.versions['1.2.0']!.dist!.tarball;
+      const change = { name: 'lodash', from: null, to: '1.2.0', resolved: canonical };
+      expect(computeSignals(change, bare, { now })[0]).toEqual({
+        id: 'tarball-mismatch',
+        group: 'tamper',
+        before: 'no tarball URL in the registry',
+        after: canonical,
+      });
+    });
+
+    it('compares a sha1 integrity with the registry shasum', () => {
+      const old = packument('lodash', [{ version: '1.2.0', time: '2025-12-01T00:00:00Z' }]);
+      // async@0.1.0's shasum, and the same hash as a lockfile writes it
+      old.versions['1.2.0']!.dist!.shasum = 'ab8ece0c4062da5f6d2fa1d07fc4cdb5f8b9b25b';
+      const change = (integrity: string) => ({
+        name: 'lodash',
+        from: null,
+        to: '1.2.0',
+        integrity,
+        resolved: 'https://registry.npmjs.org/elsewhere.tgz',
+      });
+      expect(
+        ids(computeSignals(change('sha1-q47ODEBi2l9tL6HQf8TNtfi5sls='), old, { now })),
+      ).toEqual([]);
+      expect(ids(computeSignals(change('sha1-evil'), old, { now }))).toEqual([
+        'integrity-mismatch',
+      ]);
+    });
+
+    it('falls back to a sha1 `integrity` when the registry has no usable shasum', () => {
+      const old = packument('lodash', [{ version: '1.2.0', time: '2025-12-01T00:00:00Z' }]);
+      old.versions['1.2.0']!.dist!.integrity = 'sha1-good';
+      const change = {
+        name: 'lodash',
+        from: null,
+        to: '1.2.0',
+        integrity: 'sha1-evil',
+        resolved: 'https://registry.npmjs.org/lodash/-/x-1.2.0.tgz',
+      };
+      expect(ids(computeSignals(change, old, { now }))).toEqual(['integrity-mismatch']);
+    });
+
+    it("trusts the registry's own tarball URL without an integrity", () => {
+      expect(vet(canonical)).toEqual([]);
+    });
+
+    it('leaves the URL alone when the integrity matches the registry: npm checks the content', () => {
+      expect(
+        vet('https://registry.npmjs.org/evil/-/evil-1.0.0.tgz', 'sha512-lodash-1.2.0'),
+      ).toEqual([]);
+    });
+  });
+
   it('flags a version the registry does not serve', () => {
     const p = packument('pkg', [
       ...history,
@@ -228,24 +325,26 @@ describe('computeSignals', () => {
   });
 });
 
+// The verdict table in DESIGN.md, row by row.
 describe('decide', () => {
-  const s = (group: Signal['group']): Signal => ({
-    id: 'fresh-publish',
-    group,
-    before: '',
-    after: '',
-  });
+  // A real signal of each group, so the rows read like what bumpvet reports.
+  const of: Record<Signal['group'], Signal> = {
+    origin: { id: 'publisher-changed', group: 'origin', before: 'alice', after: 'mallory' },
+    timing: { id: 'fresh-publish', group: 'timing', before: '>= 72h old', after: '1h old' },
+    content: { id: 'install-scripts', group: 'content', before: 'none', after: 'node x.js' },
+    tamper: { id: 'integrity-mismatch', group: 'tamper', before: 'sha512-a', after: 'sha512-b' },
+  };
   it.each([
     [[], 'ok'],
-    [[s('timing')], 'ok'],
-    [[s('origin'), s('timing')], 'review'],
-    [[s('content'), s('timing')], 'block'],
-    [[s('origin')], 'review'],
-    [[s('content')], 'review'],
-    [[s('origin'), s('origin')], 'review'],
-    [[s('origin'), s('content')], 'block'],
-    [[s('tamper')], 'block'],
-  ] as const)('%j -> %s', (signals, verdict) => {
-    expect(decide([...signals])).toBe(verdict);
+    [['timing'], 'ok'],
+    [['origin'], 'review'],
+    [['origin', 'origin'], 'review'],
+    [['origin', 'timing'], 'review'],
+    [['content'], 'review'],
+    [['content', 'timing'], 'block'],
+    [['origin', 'content'], 'block'],
+    [['tamper'], 'block'],
+  ] as const)('%j -> %s', (groups, verdict) => {
+    expect(decide(groups.map((g) => of[g]))).toBe(verdict);
   });
 });

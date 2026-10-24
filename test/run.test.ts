@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -172,12 +172,21 @@ describe('errors exit 2 with a message', () => {
     [['--nope'], /unknown option --nope/],
     [['--base'], /--base needs a git ref/],
     [['only-one.json'], /either no lockfiles or two/],
-    [['missing.json', 'also-missing.json'], /cannot read missing\.json/],
+    [['missing.json', 'also-missing.json'], /cannot read missing\.json \(in .+\): ENOENT/],
   ])('%j', async (argv, message) => {
     const r = await run(argv, tempDir());
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(message);
     expect(r.stdout).toBe('');
+  });
+
+  it('saying why a lockfile cannot be read', async () => {
+    const dir = tempDir();
+    mkdirSync(join(dir, 'new.json'));
+    writeFileSync(join(dir, 'old.json'), v1);
+    const r = await run(['old.json', 'new.json'], dir);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/cannot read new\.json \(in .+\): EISDIR/);
   });
 
   it('outside a git repository', async () => {
@@ -194,19 +203,79 @@ describe('errors exit 2 with a message', () => {
     }
   });
 
+  it('when git is not installed, pointing to the two-file form', async () => {
+    const dir = tempDir();
+    writeFileSync(join(dir, 'package-lock.json'), v1);
+    const path = process.env.PATH;
+    process.env.PATH = dir; // a directory with no git in it
+    try {
+      const r = await run([], dir);
+      expect(r.code).toBe(2);
+      expect(r.stderr).toMatch(/git not found; compare two files instead/);
+    } finally {
+      if (path === undefined) delete process.env.PATH;
+      else process.env.PATH = path;
+    }
+  });
+
+  it('when HEAD points at a commit that does not exist', async () => {
+    const dir = repo(v1);
+    // Delete the commit object itself; this works whatever ref storage git uses.
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+    rmSync(join(dir, '.git', 'objects', sha.slice(0, 2), sha.slice(2)));
+    const r = await run([], dir);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/HEAD does not name a commit in this repository/);
+  });
+
+  it('when the working directory does not exist', async () => {
+    const r = await run([], join(tempDir(), 'gone'));
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/working directory .+ does not exist/);
+  });
+
+  it('when the working directory is a file', async () => {
+    const file = join(tempDir(), 'file');
+    writeFileSync(file, '');
+    const r = await run([], file);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/working directory .+ is not a directory/);
+  });
+
+  it('with a shallow-clone hint when the commit was not fetched', async () => {
+    const origin = repo(v1);
+    writeFileSync(join(origin, 'package-lock.json'), v11);
+    git(origin, 'commit', '-q', '-am', 'bump');
+    const clone = tempDir();
+    git(clone, 'clone', '-q', '--depth', '1', `file://${origin}`, '.');
+    const r = await run(['--base', 'HEAD~1'], clone);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/HEAD~1 does not name a commit .+this is a shallow clone/);
+  });
+
+  it('when the working directory cannot be reached (EACCES)', async () => {
+    const locked = join(tempDir(), 'locked');
+    mkdirSync(join(locked, 'app'), { recursive: true });
+    chmodSync(locked, 0o000);
+    try {
+      const r = await run([], join(locked, 'app'));
+      expect(r.code).toBe(2);
+      expect(r.stderr).toMatch(/working directory .+ cannot be used: EACCES/);
+    } finally {
+      chmodSync(locked, 0o755); // so the cleanup can remove it
+    }
+  });
+
+  it('without a shallow-clone hint when the ref is just wrong', async () => {
+    const r = await run(['--base', 'mian'], repo(v1));
+    expect(r.stderr).toMatch(/mian does not name a commit/);
+    expect(r.stderr).not.toMatch(/shallow/);
+  });
+
   it('for a --base ref that does not exist', async () => {
     const r = await run(['--base', 'nope'], repo(v1));
     expect(r.code).toBe(2);
-    expect(r.stderr).toMatch(/git show nope:package-lock.json failed/);
-  });
-
-  it('naming the path git was asked for in a subdirectory', async () => {
-    const dir = repo(v1);
-    const sub = join(dir, 'app');
-    mkdirSync(sub);
-    writeFileSync(join(sub, 'package-lock.json'), v1);
-    const r = await run(['--base', 'nope'], sub);
-    expect(r.stderr).toMatch(/git show nope:app\/package-lock.json failed/);
+    expect(r.stderr).toMatch(/nope does not name a commit in this repository/);
   });
 
   it('when the registry fails', async () => {
