@@ -25,11 +25,11 @@ You need Node.js 22 or later. The repository pins 24 in `.nvmrc`:
 
 ```sh
 nvm use
-npm ci --ignore-scripts
+npm ci
 ```
 
-`--ignore-scripts` is how CI installs too: no dependency needs its install
-scripts here.
+`.npmrc` keeps dependencies' install scripts from running, here and in CI.
+Read its comment before changing it.
 
 | Command                | What it does                                         |
 | ---------------------- | ---------------------------------------------------- |
