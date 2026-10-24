@@ -6,16 +6,23 @@ export interface Change {
   to: string;
   /** Integrity the new lockfile expects, if it records one. */
   integrity?: string;
+  /** Set when the new version does not come from the public registry. */
+  source?: string;
+  /** Set when the version being replaced did not come from the public registry. */
+  fromSource?: string;
+  /** The old lockfile's integrity for this same version, when it differs. */
+  fromIntegrity?: string;
 }
 
-/** A changed package that does not come from the public registry. */
-export interface Unvetted {
-  name: string;
-  version: string;
-  source: string;
-}
-
-export type SignalId = 'publisher-changed' | 'provenance-lost' | 'fresh-publish' | 'install-scripts' | 'integrity-mismatch' | 'not-in-registry';
+export type SignalId =
+  | 'publisher-changed'
+  | 'provenance-lost'
+  | 'fresh-publish'
+  | 'install-scripts'
+  | 'not-from-registry'
+  | 'source-changed'
+  | 'integrity-mismatch'
+  | 'not-in-registry';
 
 /** Which side of the verdict table a signal belongs to (see DESIGN.md). */
 export type SignalGroup = 'origin' | 'timing' | 'content' | 'tamper';

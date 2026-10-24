@@ -9,6 +9,8 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { slim } from '../src/registry.js';
 import { computeSignals } from '../src/signals.js';
 import { decide } from '../src/verdict.js';
 import type { Packument, SignalId, Verdict } from '../src/types.js';
@@ -20,7 +22,7 @@ const PACKAGES = readFileSync(new URL('../../eval/packages.txt', import.meta.url
 const arg = (flag: string) => Number(process.argv[process.argv.indexOf(flag) + 1]) || undefined;
 const perPackage = arg('--per-package') ?? 10;
 const baselineSize = arg('--baseline');
-const CACHE = new URL('../../eval/.cache/', import.meta.url).pathname;
+const CACHE = fileURLToPath(new URL('../../eval/.cache/', import.meta.url));
 const DELAYS = [
   { label: '1h after publish', hours: 1 },
   { label: '7d after publish', hours: 24 * 7 },
@@ -29,14 +31,14 @@ const DELAYS = [
 async function load(name: string): Promise<Packument> {
   const file = join(CACHE, name.replace('/', '__') + '.json');
   try {
-    return JSON.parse(readFileSync(file, 'utf8')) as Packument;
+    return slim(JSON.parse(readFileSync(file, 'utf8')) as Packument);
   } catch {
     const res = await fetch('https://registry.npmjs.org/' + name.replace('/', '%2f'));
     if (!res.ok) throw new Error(`${name}: ${res.status}`);
     const text = await res.text();
     mkdirSync(CACHE, { recursive: true });
     writeFileSync(file, text);
-    return JSON.parse(text) as Packument;
+    return slim(JSON.parse(text) as Packument);
   }
 }
 

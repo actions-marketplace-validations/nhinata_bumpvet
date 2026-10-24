@@ -1,4 +1,4 @@
-import type { Change, Unvetted } from './types.js';
+import type { Change } from './types.js';
 
 const REGISTRY = 'https://registry.npmjs.org/';
 
@@ -40,35 +40,39 @@ export function parseLockfile(text: string): Map<string, LockPackage> {
   return out;
 }
 
-export interface LockfileDiff {
-  changes: Change[];
-  /** Changed packages that do not come from the public registry, so bumpvet cannot vet them. */
-  unvetted: Unvetted[];
+/** True when two entries of the same version would install the same thing. */
+function sameArtifact(a: LockPackage, b: LockPackage): boolean {
+  return a.elsewhere === b.elsewhere && (!a.integrity || !b.integrity || a.integrity === b.integrity);
 }
 
 /**
- * Package versions the new lockfile installs that the old one did not install
- * anywhere. A version that only moved to another path was already trusted.
+ * What the new lockfile installs that the old one did not. A version that only
+ * moved to another path was already trusted; the same version from another
+ * source or with another integrity was not.
  */
-export function diffLockfiles(oldText: string | null, newText: string): LockfileDiff {
+export function diffLockfiles(oldText: string | null, newText: string): Change[] {
   const before = oldText === null ? new Map<string, LockPackage>() : parseLockfile(oldText);
-  const after = parseLockfile(newText);
-  const installed = new Set([...before.values()].map((p) => `${p.name}@${p.version}`));
-  const anyVersion = new Map([...before.values()].map((p) => [p.name, p.version]));
+  const old = [...before.values()];
   const seen = new Set<string>();
   const changes: Change[] = [];
-  const unvetted: Unvetted[] = [];
-  for (const [path, pkg] of after) {
-    if (installed.has(`${pkg.name}@${pkg.version}`)) continue;
-    const prev = before.get(path);
-    const from = prev && prev.name === pkg.name ? prev.version : (anyVersion.get(pkg.name) ?? null);
-    const key = `${pkg.name}@${from}>${pkg.version}`;
+  for (const [path, pkg] of parseLockfile(newText)) {
+    const sameVersion = old.filter((p) => p.name === pkg.name && p.version === pkg.version);
+    if (sameVersion.some((p) => sameArtifact(p, pkg))) continue;
+
+    const atPath = before.get(path);
+    const prev = sameVersion[0] ?? (atPath?.name === pkg.name ? atPath : old.find((p) => p.name === pkg.name));
+    const change: Change = { name: pkg.name, from: prev?.version ?? null, to: pkg.version, integrity: pkg.integrity };
+    if (pkg.elsewhere) change.source = pkg.elsewhere;
+    if (prev?.elsewhere) change.fromSource = prev.elsewhere;
+    if (prev && prev.version === pkg.version && prev.integrity && pkg.integrity && prev.integrity !== pkg.integrity) {
+      change.fromIntegrity = prev.integrity;
+    }
+
+    // What gets vetted is the new artifact; it is listed once, against the first version it replaces.
+    const key = JSON.stringify([change.name, change.to, change.source, change.integrity]);
     if (seen.has(key)) continue;
     seen.add(key);
-    if (pkg.elsewhere) unvetted.push({ name: pkg.name, version: pkg.version, source: pkg.elsewhere });
-    else changes.push({ name: pkg.name, from, to: pkg.version, integrity: pkg.integrity });
+    changes.push(change);
   }
-  changes.sort((a, b) => a.name.localeCompare(b.name) || a.to.localeCompare(b.to));
-  unvetted.sort((a, b) => a.name.localeCompare(b.name));
-  return { changes, unvetted };
+  return changes.sort((a, b) => a.name.localeCompare(b.name) || a.to.localeCompare(b.to));
 }

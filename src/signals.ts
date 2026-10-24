@@ -9,19 +9,31 @@ export interface SignalOptions {
   freshHours?: number;
 }
 
-const INSTALL_HOOKS = ['preinstall', 'install', 'postinstall'] as const;
+export const INSTALL_HOOKS = ['preinstall', 'install', 'postinstall'] as const;
 
 /** Compares the new version with the versions before it and returns what changed. */
 export function computeSignals(change: Change, packument: Packument | null, opts: SignalOptions): Signal[] {
   const { now, baselineSize = 20, freshHours = 72 } = opts;
-  const next = packument?.versions[change.to];
-  if (!packument || !next) {
-    return [{ id: 'not-in-registry', group: 'tamper', before: 'lockfile', after: `${change.name}@${change.to} not found` }];
+  if (change.source) {
+    // Nothing to compare against. Moving off the registry is how lockfile injection looks.
+    const moved = change.from !== null && !change.fromSource;
+    const before = change.fromSource ?? (change.from === null ? 'not installed' : 'npm registry');
+    return [{ id: moved ? 'source-changed' : 'not-from-registry', group: moved ? 'tamper' : 'origin', before, after: change.source }];
   }
 
   const signals: Signal[] = [];
+  if (change.fromIntegrity && change.integrity && sameAlgorithm(change.fromIntegrity, change.integrity)) {
+    signals.push({ id: 'integrity-mismatch', group: 'tamper', before: change.fromIntegrity, after: change.integrity });
+  }
+
+  const next = packument?.versions[change.to];
+  if (!packument || !next) {
+    return [...signals, { id: 'not-in-registry', group: 'tamper', before: 'lockfile', after: `${change.name}@${change.to} not found` }];
+  }
+
   const expected = next.dist?.integrity;
-  if (change.integrity && expected && sameAlgorithm(change.integrity, expected) && change.integrity !== expected) {
+  // One integrity signal is enough; the lockfile-to-lockfile one above is the more direct.
+  if (!signals.length && change.integrity && expected && sameAlgorithm(change.integrity, expected) && change.integrity !== expected) {
     signals.push({ id: 'integrity-mismatch', group: 'tamper', before: expected, after: change.integrity });
   }
 

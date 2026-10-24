@@ -38,7 +38,8 @@ function parseArgs(argv: string[]): Args {
 }
 
 function git(args: string[]): string {
-  return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1 << 30 });
+  // LC_ALL=C keeps git's messages in English so the checks below can read them.
+  return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1 << 30, env: { ...process.env, LC_ALL: 'C' } });
 }
 
 /** The lockfile at `ref`, or null when it did not exist there (every package is then new). */
@@ -79,9 +80,9 @@ async function main(): Promise<number> {
     args.files.length === 2
       ? [readLockfile(args.files[0]!), readLockfile(args.files[1]!)]
       : [lockfileAt(args.base), readLockfile('package-lock.json')];
-  const report = await vetLockfiles(oldText, newText, registryFetcher(), { now: new Date() });
-  process.stdout.write(args.json ? formatJson(report) : formatText(report));
-  return report.results.some((r) => r.verdict === 'block') ? 1 : 0;
+  const results = await vetLockfiles(oldText, newText, registryFetcher(), { now: new Date() });
+  process.stdout.write(args.json ? formatJson(results) : formatText(results));
+  return results.some((r) => r.verdict === 'block') ? 1 : 0;
 }
 
 main().then(

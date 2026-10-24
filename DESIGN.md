@@ -31,7 +31,9 @@ what it deliberately does not do, and why.
 | `provenance-lost` | origin | the version being replaced had npm provenance and the new one does not |
 | `fresh-publish` | timing | the new version is less than 72 hours old |
 | `install-scripts` | content | a `preinstall`, `install` or `postinstall` script was added or changed |
-| `integrity-mismatch` | tamper | the lockfile's integrity hash differs from the registry's |
+| `not-from-registry` | origin | the package comes from git, a `file:` path, another registry, or an unknown source, so there is nothing to compare it with |
+| `source-changed` | tamper | a package that came from the public registry now comes from somewhere else (how lockfile injection looks) |
+| `integrity-mismatch` | tamper | the lockfile's integrity hash changed for the same version, or differs from the registry's |
 | `not-in-registry` | tamper | the registry does not serve the version (npm removes malicious releases) |
 
 ## Verdict table
@@ -62,6 +64,10 @@ what it deliberately does not do, and why.
   valid provenance; bumpvet does not defend against that case through this
   signal.
 - **Removing an install script is not a signal.** It takes power away.
+- **Packages bumpvet cannot vet are signals too.** An early version listed them
+  in a separate "not vetted" section, outside the verdict table; that broke
+  principle 2 and let them pass with exit code 0. They now go through the
+  table like everything else.
 
 ## Known misses
 
@@ -69,6 +75,11 @@ what it deliberately does not do, and why.
   compromised account, no install script. v0.1 sees only freshness and says
   `OK`. Content analysis (planned) is what would catch it.
 - `chalk@5.6.1`: caught as `REVIEW`, not `BLOCK`, for the same reason.
+
+## Known limitations
+
+- Only the public npm registry. Behind a mirror or a private registry every
+  package is `not-from-registry`, so everything is `REVIEW`.
 
 ## Not doing (and why)
 

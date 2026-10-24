@@ -50,9 +50,9 @@ Exit codes: `0` nothing to block, `1` at least one `BLOCK`, `2` error.
 
 | Signals | Verdict |
 |---|---|
-| lockfile integrity differs from the registry, or the version is gone from it | BLOCK |
+| the lockfile's source or integrity was changed for a registry package, or the version is gone from the registry | BLOCK |
 | a content change (new or changed install script) together with an unusual origin or a fresh release | BLOCK |
-| an unusual origin (new publisher, lost provenance) or a content change | REVIEW |
+| an unusual origin (new publisher, lost provenance, not from the registry) or a content change | REVIEW |
 | nothing, or only a fresh release | OK |
 
 The signals, the thresholds and the measurements behind them are in

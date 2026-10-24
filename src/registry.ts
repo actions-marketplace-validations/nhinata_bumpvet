@@ -1,3 +1,4 @@
+import { INSTALL_HOOKS } from './signals.js';
 import type { Packument, VersionManifest } from './types.js';
 
 export type FetchPackument = (name: string) => Promise<Packument | null>;
@@ -9,7 +10,7 @@ export function registryFetcher(base = 'https://registry.npmjs.org/', fetchImpl:
     let p = cache.get(name);
     if (!p) {
       p = (async () => {
-        const res = await fetchImpl(base + name.replace('/', '%2f'), { headers: { accept: 'application/json' } });
+        const res = await fetchImpl(base + name.replace('/', '%2f'), { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(60_000) });
         if (res.status === 404) return null;
         if (!res.ok) throw new Error(`registry returned ${res.status} for ${name}`);
         return slim((await res.json()) as Packument);
@@ -27,7 +28,7 @@ export function registryFetcher(base = 'https://registry.npmjs.org/', fetchImpl:
 export function slim(p: Packument): Packument {
   const versions: Record<string, VersionManifest> = {};
   for (const [v, m] of Object.entries(p.versions ?? {})) {
-    const scripts = m.scripts && Object.fromEntries(['preinstall', 'install', 'postinstall'].filter((h) => m.scripts![h]).map((h) => [h, m.scripts![h]!]));
+    const scripts = m.scripts && Object.fromEntries(INSTALL_HOOKS.filter((h) => m.scripts![h]).map((h) => [h, m.scripts![h]!]));
     versions[v] = {
       version: v,
       _npmUser: m._npmUser?.name ? { name: m._npmUser.name } : undefined,

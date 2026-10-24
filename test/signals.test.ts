@@ -79,6 +79,28 @@ describe('computeSignals', () => {
     expect(computeSignals({ name: 'pkg', from: '1.1.0', to: '1.2.0', integrity: 'sha1-old' }, p, { now })).toEqual([]);
   });
 
+  it('flags a lockfile integrity that changed for the same version', () => {
+    const p = packument('pkg', [...history, { version: '1.2.0', time: '2025-12-01T00:00:00Z', publisher: 'alice', provenance: true, integrity: 'sha512-real' }]);
+    const signals = computeSignals({ name: 'pkg', from: '1.2.0', to: '1.2.0', integrity: 'sha512-other', fromIntegrity: 'sha512-real' }, p, { now });
+    expect(signals).toEqual([{ id: 'integrity-mismatch', group: 'tamper', before: 'sha512-real', after: 'sha512-other' }]);
+  });
+
+  it('flags a package that moved off the registry as tampering', () => {
+    const [s] = computeSignals({ name: 'pkg', from: '1.1.0', to: '1.1.0', source: 'https://evil.example/pkg.tgz' }, null, { now });
+    expect(s).toEqual({ id: 'source-changed', group: 'tamper', before: 'npm registry', after: 'https://evil.example/pkg.tgz' });
+  });
+
+  it('flags a package from outside the registry as an origin signal', () => {
+    const git = 'git+ssh://git@github.com/x/y.git#abc';
+    expect(computeSignals({ name: 'pkg', from: null, to: '1.0.0', source: git }, null, { now })).toEqual([
+      { id: 'not-from-registry', group: 'origin', before: 'not installed', after: git },
+    ]);
+    expect(computeSignals({ name: 'pkg', from: '0.9.0', to: '1.0.0', source: git, fromSource: 'git+ssh://old' }, null, { now })[0]).toMatchObject({
+      id: 'not-from-registry',
+      before: 'git+ssh://old',
+    });
+  });
+
   it('flags a version the registry does not serve', () => {
     const p = packument('pkg', [...history, { version: '1.2.0', time: '2025-12-01T00:00:00Z', removed: true }]);
     expect(ids(computeSignals({ name: 'pkg', from: '1.1.0', to: '1.2.0' }, p, { now }))).toEqual(['not-in-registry']);
