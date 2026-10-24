@@ -1,7 +1,7 @@
 import { diffLockfiles } from './lockfile.js';
 import type { FetchPackument } from './registry.js';
 import { computeSignals, type SignalOptions } from './signals.js';
-import type { Change, PackageResult } from './types.js';
+import type { Change, PackageResult, Unvetted } from './types.js';
 import { decide } from './verdict.js';
 
 export async function vetChanges(changes: Change[], fetchPackument: FetchPackument, opts: SignalOptions, concurrency = 8): Promise<PackageResult[]> {
@@ -19,6 +19,12 @@ export async function vetChanges(changes: Change[], fetchPackument: FetchPackume
   return results;
 }
 
-export function vetLockfiles(oldText: string | null, newText: string, fetchPackument: FetchPackument, opts: SignalOptions): Promise<PackageResult[]> {
-  return vetChanges(diffLockfiles(oldText, newText), fetchPackument, opts);
+export interface VetReport {
+  results: PackageResult[];
+  unvetted: Unvetted[];
+}
+
+export async function vetLockfiles(oldText: string | null, newText: string, fetchPackument: FetchPackument, opts: SignalOptions): Promise<VetReport> {
+  const { changes, unvetted } = diffLockfiles(oldText, newText);
+  return { results: await vetChanges(changes, fetchPackument, opts), unvetted };
 }

@@ -37,11 +37,27 @@ function parseArgs(argv: string[]): Args {
   return args;
 }
 
+function git(args: string[]): string {
+  return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1 << 30 });
+}
+
 /** The lockfile at `ref`, or null when it did not exist there (every package is then new). */
 function lockfileAt(ref: string): string | null {
-  const prefix = execFileSync('git', ['rev-parse', '--show-prefix'], { encoding: 'utf8' }).trim();
+  let prefix: string;
   try {
-    return execFileSync('git', ['show', `${ref}:${prefix}package-lock.json`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1 << 30 });
+    prefix = git(['rev-parse', '--show-prefix']).trim();
+  } catch {
+    throw new Error('not inside a git repository; compare two files instead: bumpvet <old-lock> <new-lock>');
+  }
+  if (ref === 'HEAD') {
+    try {
+      git(['rev-parse', '--verify', 'HEAD']);
+    } catch {
+      return null; // no commits yet
+    }
+  }
+  try {
+    return git(['show', `${ref}:${prefix}package-lock.json`]);
   } catch (err) {
     const stderr = String((err as { stderr?: unknown }).stderr ?? '');
     if (/does not exist|exists on disk, but not in/.test(stderr)) return null;
@@ -63,9 +79,9 @@ async function main(): Promise<number> {
     args.files.length === 2
       ? [readLockfile(args.files[0]!), readLockfile(args.files[1]!)]
       : [lockfileAt(args.base), readLockfile('package-lock.json')];
-  const results = await vetLockfiles(oldText, newText, registryFetcher(), { now: new Date() });
-  process.stdout.write(args.json ? formatJson(results) : formatText(results));
-  return results.some((r) => r.verdict === 'block') ? 1 : 0;
+  const report = await vetLockfiles(oldText, newText, registryFetcher(), { now: new Date() });
+  process.stdout.write(args.json ? formatJson(report) : formatText(report));
+  return report.results.some((r) => r.verdict === 'block') ? 1 : 0;
 }
 
 main().then(

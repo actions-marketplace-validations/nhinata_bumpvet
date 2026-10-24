@@ -8,6 +8,13 @@ export interface Change {
   integrity?: string;
 }
 
+/** A changed package that does not come from the public registry. */
+export interface Unvetted {
+  name: string;
+  version: string;
+  source: string;
+}
+
 export type SignalId = 'publisher-changed' | 'provenance-lost' | 'fresh-publish' | 'install-scripts' | 'integrity-mismatch' | 'not-in-registry';
 
 /** Which side of the verdict table a signal belongs to (see DESIGN.md). */
