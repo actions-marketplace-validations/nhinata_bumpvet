@@ -1,0 +1,104 @@
+import { describe, expect, it } from 'vitest';
+import { computeSignals } from '../src/signals.js';
+import { decide } from '../src/verdict.js';
+import type { Signal } from '../src/types.js';
+import { packument } from './helpers.js';
+
+const now = new Date('2026-01-10T00:00:00Z');
+const ids = (signals: Signal[]) => signals.map((s) => s.id);
+
+const history = [
+  { version: '1.0.0', time: '2025-01-01T00:00:00Z', publisher: 'alice', provenance: true },
+  { version: '1.1.0', time: '2025-06-01T00:00:00Z', publisher: 'bob', provenance: true },
+];
+
+describe('computeSignals', () => {
+  it('finds nothing in an ordinary release', () => {
+    const p = packument('pkg', [...history, { version: '1.2.0', time: '2025-12-01T00:00:00Z', publisher: 'alice', provenance: true }]);
+    expect(computeSignals({ name: 'pkg', from: '1.1.0', to: '1.2.0' }, p, { now })).toEqual([]);
+  });
+
+  it('flags a publisher who did not publish any of the recent versions', () => {
+    const p = packument('pkg', [...history, { version: '1.2.0', time: '2025-12-01T00:00:00Z', publisher: 'mallory' }]);
+    const signals = computeSignals({ name: 'pkg', from: '1.1.0', to: '1.2.0' }, p, { now });
+    expect(ids(signals)).toEqual(['publisher-changed', 'provenance-lost']);
+    expect(signals[0]).toEqual({ id: 'publisher-changed', group: 'origin', before: 'alice, bob', after: 'mallory' });
+  });
+
+  it('does not flag a new publisher when the release has provenance', () => {
+    const p = packument('pkg', [...history, { version: '1.2.0', time: '2025-12-01T00:00:00Z', publisher: 'GitHub Actions', provenance: true }]);
+    expect(computeSignals({ name: 'pkg', from: '1.1.0', to: '1.2.0' }, p, { now })).toEqual([]);
+  });
+
+  it('flags provenance that the previous version had and the new one lacks', () => {
+    const p = packument('pkg', [...history, { version: '1.2.0', time: '2025-12-01T00:00:00Z', publisher: 'alice' }]);
+    expect(ids(computeSignals({ name: 'pkg', from: '1.1.0', to: '1.2.0' }, p, { now }))).toEqual(['provenance-lost']);
+  });
+
+  it('does not flag a package that never had provenance', () => {
+    const p = packument('pkg', [
+      { version: '1.0.0', time: '2025-01-01T00:00:00Z', publisher: 'alice' },
+      { version: '1.1.0', time: '2025-12-01T00:00:00Z', publisher: 'alice' },
+    ]);
+    expect(computeSignals({ name: 'pkg', from: '1.0.0', to: '1.1.0' }, p, { now })).toEqual([]);
+  });
+
+  it('flags a version published within the fresh window', () => {
+    const p = packument('pkg', [...history, { version: '1.2.0', time: '2026-01-09T22:00:00Z', publisher: 'alice', provenance: true }]);
+    const [s] = computeSignals({ name: 'pkg', from: '1.1.0', to: '1.2.0' }, p, { now });
+    expect(s).toMatchObject({ id: 'fresh-publish', after: '2h old' });
+  });
+
+  it('flags added or changed install scripts against the version being replaced', () => {
+    const p = packument('pkg', [...history, { version: '1.2.0', time: '2025-12-01T00:00:00Z', publisher: 'alice', provenance: true, scripts: { postinstall: 'node x.js', test: 'vitest' } }]);
+    const [s] = computeSignals({ name: 'pkg', from: '1.1.0', to: '1.2.0' }, p, { now });
+    expect(s).toEqual({ id: 'install-scripts', group: 'content', before: 'postinstall: none', after: 'postinstall: node x.js' });
+  });
+
+  it('does not flag a removed install script', () => {
+    const p = packument('pkg', [
+      { version: '1.0.0', time: '2025-01-01T00:00:00Z', publisher: 'alice', scripts: { install: 'node check.js' } },
+      { version: '1.1.0', time: '2025-12-01T00:00:00Z', publisher: 'alice' },
+    ]);
+    expect(computeSignals({ name: 'pkg', from: '1.0.0', to: '1.1.0' }, p, { now })).toEqual([]);
+  });
+
+  it('compares a newly added package with the version published before it', () => {
+    const p = packument('pkg', [...history, { version: '1.2.0', time: '2025-12-01T00:00:00Z', publisher: 'alice' }]);
+    expect(ids(computeSignals({ name: 'pkg', from: null, to: '1.2.0' }, p, { now }))).toEqual(['provenance-lost']);
+  });
+
+  it('flags a lockfile integrity that differs from the registry', () => {
+    const p = packument('pkg', [...history, { version: '1.2.0', time: '2025-12-01T00:00:00Z', publisher: 'alice', provenance: true, integrity: 'sha512-real' }]);
+    const signals = computeSignals({ name: 'pkg', from: '1.1.0', to: '1.2.0', integrity: 'sha512-other' }, p, { now });
+    expect(ids(signals)).toEqual(['integrity-mismatch']);
+  });
+
+  it('does not compare integrities that use different algorithms', () => {
+    const p = packument('pkg', [...history, { version: '1.2.0', time: '2025-12-01T00:00:00Z', publisher: 'alice', provenance: true, integrity: 'sha512-real' }]);
+    expect(computeSignals({ name: 'pkg', from: '1.1.0', to: '1.2.0', integrity: 'sha1-old' }, p, { now })).toEqual([]);
+  });
+
+  it('flags a version the registry does not serve', () => {
+    const p = packument('pkg', [...history, { version: '1.2.0', time: '2025-12-01T00:00:00Z', removed: true }]);
+    expect(ids(computeSignals({ name: 'pkg', from: '1.1.0', to: '1.2.0' }, p, { now }))).toEqual(['not-in-registry']);
+    expect(ids(computeSignals({ name: 'nope', from: null, to: '1.0.0' }, null, { now }))).toEqual(['not-in-registry']);
+  });
+});
+
+describe('decide', () => {
+  const s = (group: Signal['group']): Signal => ({ id: 'fresh-publish', group, before: '', after: '' });
+  it.each([
+    [[], 'ok'],
+    [[s('timing')], 'ok'],
+    [[s('origin'), s('timing')], 'review'],
+    [[s('content'), s('timing')], 'block'],
+    [[s('origin')], 'review'],
+    [[s('content')], 'review'],
+    [[s('origin'), s('origin')], 'review'],
+    [[s('origin'), s('content')], 'block'],
+    [[s('tamper')], 'block'],
+  ] as const)('%j -> %s', (signals, verdict) => {
+    expect(decide([...signals])).toBe(verdict);
+  });
+});

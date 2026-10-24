@@ -1,0 +1,38 @@
+{
+  "name": "bumpvet",
+  "version": "0.1.0",
+  "description": "Should a human look at this dependency update before it is merged?",
+  "type": "module",
+  "bin": {
+    "bumpvet": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "eval": "tsc -p tsconfig.json && node dist-eval/eval/run.js"
+  },
+  "keywords": [
+    "npm",
+    "supply-chain",
+    "security",
+    "lockfile",
+    "dependabot",
+    "renovate",
+    "provenance"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "20.19.43",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts"
+}
