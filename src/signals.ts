@@ -71,6 +71,8 @@ export function computeSignals(
     comparable &&
     change.integrity &&
     expected &&
+    // The whole string: npm accepts content that matches any one of several hashes,
+    // so the registry's hash beside another must not count as a match (DESIGN.md).
     change.integrity !== expected
   ) {
     signals.push({
