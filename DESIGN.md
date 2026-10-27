@@ -185,10 +185,12 @@ before the same checks are trusted for it.
 
 ## Known misses
 
-- `debug@4.4.2` (September 2025): published by its usual maintainer's
-  compromised account, no install script. v0.1 sees only freshness and says
-  `OK`. Content analysis (planned) is what would catch it.
-- `chalk@5.6.1`: caught as `REVIEW`, not `BLOCK`, for the same reason.
+- A malicious release with its payload in the package code, of a package
+  whose releases had no provenance, published from an account that usually
+  publishes it, shows only freshness and is `OK` (`debug@4.4.2`; the rest
+  are in eval/README.md, "Detection: incidents"). From an unusual account it
+  is `REVIEW`, not `BLOCK` (`chalk@5.6.1`). Content analysis (planned) is
+  what would catch it.
 
 ## Known limitations
 
