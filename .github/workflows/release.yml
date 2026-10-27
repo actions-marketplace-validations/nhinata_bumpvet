@@ -6,8 +6,9 @@ name: Release
 # package-lock.json, .github/release-please-manifest.json and action.yml, and
 # CHANGELOG.md. Merging that tags v<version> and creates the GitHub release;
 # the jobs below then build, test and publish it to npm with provenance, and
-# test the action with the version just published. Nothing is published from a
-# laptop.
+# test the action with the version just published. update-readme.yml then
+# opens a pull request that points the action example in README at it.
+# Nothing is published from a laptop.
 #
 # Run by hand (Run workflow on main, with the tag) to publish a tag again after
 # a failure outside the tagged code, such as the npm settings. If the tagged
@@ -64,11 +65,15 @@ jobs:
     env:
       TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || needs.release-please.outputs.tag_name }}
     outputs:
+      tag: ${{ env.TAG }}
       node: ${{ steps.node.outputs.node-version }}
       sha: ${{ steps.commit.outputs.sha }}
       file: ${{ steps.pack.outputs.file }}
       sha256: ${{ steps.pack.outputs.sha256 }}
     steps:
+      # update-readme.yml compares versions with sort -V, which puts a
+      # prerelease such as v1.0.0-rc.1 after v1.0.0; revisit it before
+      # allowing prerelease tags here.
       - name: Check the tag
         run: '[[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not a release tag: $TAG"; exit 1; }'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -180,3 +185,14 @@ jobs:
     uses: ./.github/workflows/test-action.yml
     with:
       ref: ${{ needs.build.outputs.sha }}
+
+  readme:
+    needs: [build, test-action]
+    if: ${{ !cancelled() && needs.test-action.result == 'success' }}
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: ./.github/workflows/update-readme.yml
+    with:
+      tag: ${{ needs.build.outputs.tag }}
+      sha: ${{ needs.build.outputs.sha }}
