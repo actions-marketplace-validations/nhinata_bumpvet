@@ -88,3 +88,25 @@ can contribute several packages. Left out: `event-stream@3.3.6` (the
 registry no longer keeps the original time of the dependency that carried the
 payload) and `eslint-config-prettier@10.1.6` (whether it was malicious is
 disputed).
+
+## Content: groundwork for content signals
+
+Content signals (issue #44) would report a kind of code a release adds, such
+as running commands or a new network host, compared with the version it
+upgrades from. Before any is added, two counts say which kinds are worth it:
+
+- **Benign:** `npm run eval:content` reads the tarballs of the updates above
+  and counts how often each kind is added. Tarballs are checked against the
+  registry's integrity and read in memory; nothing is kept.
+- **Malicious:** the [Evaluate content](../.github/workflows/eval-content.yml)
+  workflow, run by hand, does the same for real malicious releases from the
+  [Datadog malicious packages dataset](https://github.com/DataDog/malicious-software-packages-dataset),
+  listed with their hashes in [samples.json](samples.json): the hijacked
+  releases of existing npm packages that GuardDog's evaluation picked, one per
+  cluster of similar code, and the dataset's incidents from
+  [test/incidents.test.ts](../test/incidents.test.ts).
+  [samples-build.ts](samples-build.ts) writes the list from metadata alone.
+  The samples are unzipped and read one at a time, only inside a container
+  without network, never run, and never downloaded outside GitHub Actions.
+
+Both print the kinds of code found, never the code.
