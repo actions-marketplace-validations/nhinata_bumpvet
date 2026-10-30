@@ -45,17 +45,17 @@ cites its report. Every one is a malicious new version of an existing package,
 published from a hijacked account or token or by the maintainer on purpose:
 the registry shows bumpvet the same thing either way.
 
-### Results (2026-10-27, v0.2.1)
+### Results (2026-10-29, with content signals)
 
 Vetted 1 hour after the malicious publish. An incident's verdict is the
 strictest among the packages it brings in.
 
 | Incident                                       | Verdict         | Signals                                                                                                                        |
 | ---------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `chalk@5.6.1` (2025-09)                        | REVIEW          | publisher-changed, fresh-publish                                                                                               |
-| `debug@4.4.2` (same campaign)                  | OK — **missed** | fresh-publish                                                                                                                  |
-| `ansi-styles@6.2.2` (same campaign)            | OK — **missed** | fresh-publish                                                                                                                  |
-| `strip-ansi@7.1.1` (same campaign)             | REVIEW          | publisher-changed, fresh-publish                                                                                               |
+| `chalk@5.6.1` (2025-09)                        | BLOCK           | publisher-changed, fresh-publish, hidden-code                                                                                  |
+| `debug@4.4.2` (same campaign)                  | BLOCK           | fresh-publish, hidden-code                                                                                                     |
+| `ansi-styles@6.2.2` (same campaign)            | BLOCK           | fresh-publish, hidden-code                                                                                                     |
+| `strip-ansi@7.1.1` (same campaign)             | BLOCK           | publisher-changed, fresh-publish, hidden-code                                                                                  |
 | `@ctrl/tinycolor@4.1.1` (2025-09)              | BLOCK           | fresh-publish, install-scripts                                                                                                 |
 | `ngx-bootstrap@20.0.4` (same worm)             | BLOCK           | fresh-publish, install-scripts                                                                                                 |
 | `eslint-scope@3.7.2` (2018-07)                 | BLOCK           | fresh-publish, install-scripts                                                                                                 |
@@ -71,9 +71,14 @@ strictest among the packages it brings in.
 | `node-ipc@10.1.1` (2022-03, by the maintainer) | OK — **missed** | fresh-publish                                                                                                                  |
 | `colors@1.4.1` (2022-01, by the maintainer)    | OK — **missed** | fresh-publish                                                                                                                  |
 
-13 of 18 caught (72%): 10 `BLOCK`, 3 `REVIEW`. All five misses carried their
-payload in the package code and came from an account that publishes the
-package; content analysis (planned) is what would see them.
+15 of 18 caught (83%): 14 `BLOCK`, 1 `REVIEW`. The September 2025 campaign is
+caught by `hidden-code`, from the code its report shows. The three misses
+carried their payload in the package code and came from an account that
+publishes the package. `@solana/web3.js@1.95.7`, from the same attack as
+1.95.6, added no kind the content signals look for in the measurement behind
+them (see [Content](#content-groundwork-for-content-signals)); for `node-ipc`
+and `colors` the test has no code from their reports. Source match (planned)
+is what would see code-only changes like these.
 
 Where a report does not name the publisher or mention provenance, the test
 fills in a value (see its header). One verdict depends on it: no report names
@@ -91,9 +96,10 @@ disputed).
 
 ## Content: groundwork for content signals
 
-Content signals (issue #44) would report a kind of code a release adds, such
-as running commands or a new network host, compared with the version it
-upgrades from. Before any is added, two counts say which kinds are worth it:
+Content signals (issue #44) report a kind of code a release adds, compared
+with the version it upgrades from. These two counts chose which kinds became
+signals (DESIGN.md, "Content signals"), from candidates such as running
+commands or a new network host:
 
 - **Benign:** `npm run eval:content` reads the tarballs of the updates above
   and counts how often each kind is added. Tarballs are checked against the
@@ -110,3 +116,18 @@ upgrades from. Before any is added, two counts say which kinds are worth it:
   without network, never run, and never downloaded outside GitHub Actions.
 
 Both print the kinds of code found, never the code.
+
+### Results (2026-10-29)
+
+From [this run](https://github.com/nhinata/bumpvet/actions/runs/40793276464)
+and `npm run eval:content` on the same day. Of the 424 malicious releases, 46
+changed no install script; the kinds of `hidden-code` and `new-capability`
+caught 39 of them, and none of the 597 benign updates. `child_process` and
+`XMLHttpRequest` would have caught one more and flagged two benign updates, so
+they are left out. The 17 releases caught only by code after spaces come from
+one attack (June 2025). Five injected changes add no new kind
+(`@solana/web3.js@1.95.7` and four more); `axios@1.14.1` changed only its
+dependencies (bumpvet blocks it through the new dependency's install script).
+The evaluation left files over 20 MB unread: none in the benign updates; the
+malicious report did not count them, so its figures may include releases read
+only in part.
