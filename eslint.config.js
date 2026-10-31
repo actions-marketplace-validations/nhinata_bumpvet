@@ -19,4 +19,35 @@ export default defineConfig(
       '@typescript-eslint/no-unnecessary-condition': 'error',
     },
   },
+  {
+    // Shared definitions (CONTRIBUTING.md, Writing code).
+    files: ['src/types/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [{ regex: '^(?!\\./[^/]+$)', message: 'src/types/ imports only from itself.' }],
+        },
+      ],
+      'no-restricted-syntax': ['error', 'ImportExpression', 'TSImportType'],
+    },
+  },
+  {
+    // Code that belongs to no domain (CONTRIBUTING.md, Writing code).
+    files: ['src/utils/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              regex: '^(?!\\./[^/]+$|node:)',
+              message: 'src/utils/ imports only from itself and Node.',
+            },
+          ],
+        },
+      ],
+      'no-restricted-syntax': ['error', 'ImportExpression', 'TSImportType'],
+    },
+  },
 );

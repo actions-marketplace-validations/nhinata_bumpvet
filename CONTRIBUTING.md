@@ -31,16 +31,15 @@ npm ci
 `.npmrc` keeps dependencies' install scripts from running, here and in CI.
 Read its comment before changing it.
 
-| Command                | What it does                                         |
-| ---------------------- | ---------------------------------------------------- |
-| `npm test`             | run the tests                                        |
-| `npm run typecheck`    | type-check sources, tests and the evaluation         |
-| `npm run lint`         | ESLint with type-aware rules                         |
-| `npm run format`       | format everything with Prettier                      |
-| `npm run format:check` | check formatting without changing files              |
-| `npm run build`        | compile to `dist/`                                   |
-| `npm run eval`         | measure false positives on popular packages (online) |
-| `npm run eval:content` | count kinds of code that benign updates add (online) |
+| Command                | What it does                                                                |
+| ---------------------- | --------------------------------------------------------------------------- |
+| `npm test`             | run the tests                                                               |
+| `npm run typecheck`    | type-check sources, tests and the evaluation                                |
+| `npm run lint`         | ESLint with type-aware rules                                                |
+| `npm run format`       | format everything with Prettier                                             |
+| `npm run format:check` | check formatting without changing files                                     |
+| `npm run build`        | compile to `dist/`                                                          |
+| `npm run eval`         | measure false positives on popular packages (see [Evaluation](#evaluation)) |
 
 CI runs `format:check`, `lint`, `typecheck`, `test` and `build` on Node.js 22,
 24 and 26, then starts the built CLI (`node dist/cli.js --help`) and the CLI
@@ -132,6 +131,15 @@ Before writing a rule, look for code that already encodes it; before changing
 one, find every place that uses it. If you are about to write a comment such
 as "as in X" or "keep in sync with Y", move the rule into one place instead.
 
+**Shared definitions go in `src/types/`.** Types and constants that several
+modules use as common terms of a domain live in `src/types/<domain>.ts`, not
+in one of the modules that use them. The types of one function's parameters
+or result, and values chosen by measurement, stay with the code that uses
+them. Files in `src/types/` import only each other, so any module can import
+them without pulling in other code or making an import cycle; lint enforces
+this. Code that belongs to no domain goes in `src/utils/`, which imports
+nothing but itself and Node's own modules, also enforced by lint.
+
 **Checks on outside data start from the threat model.** Before writing a check
 that decides whether to trust a lockfile entry or a registry response, write
 down in DESIGN.md ([Threat model](DESIGN.md#threat-model)) what an attacker
@@ -171,8 +179,11 @@ its tests go with it.
 ## Evaluation
 
 `npm run eval` replays recent releases of the packages in
-`eval/packages.txt` and reports how often bumpvet would speak up. It needs the
-network and caches packuments in `eval/.cache/`.
+`eval/packages.txt` and reports how often bumpvet would speak up, vetting each
+as the CLI does, files included. It downloads every packument and hundreds of
+tarballs, so run it in the Evaluate false positives workflow, not on your
+machine: `gh workflow run eval-false-positives.yml --ref <branch>` (in your
+fork, for a pull request from one).
 
 Run it for any change that can change a verdict. If the numbers move, update
 [eval/README.md](eval/README.md) and, when a decision rests on them,
@@ -182,11 +193,7 @@ Detection is measured by `npm test`: `test/incidents.test.ts` fixes the
 verdict of each incident. If a change moves one, update the table and the
 totals in eval/README.md, "Detection: incidents", in the same pull request.
 
-Kinds of code that releases add (groundwork for content signals, issue #44)
-are counted by `npm run eval:content` on the same benign updates, and by the
-Evaluate content workflow on real malicious releases, run by hand (see
-[eval/README.md](eval/README.md)). Figures taken from the workflow name the
-run they come from.
+Figures taken from a workflow run name the run they come from.
 
 ## Security issues
 

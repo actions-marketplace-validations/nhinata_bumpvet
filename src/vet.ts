@@ -1,15 +1,11 @@
 import { diffLockfiles } from './lockfile.js';
-import type { FetchPackument } from './registry.js';
-import type { ReadContent } from './content.js';
-import {
-  computeSignals,
-  contentSignals,
-  contentVersions,
-  hasKinds,
-  type SignalOptions,
-} from './signals.js';
-import type { Change, PackageResult } from './types.js';
+import { comparedVersions, computeSignals, contentSignals, hasKinds } from './signals.js';
 import { decide } from './verdict.js';
+import type { ReadContent } from './types/content.js';
+import type { Change } from './types/lockfile.js';
+import type { FetchPackument } from './types/registry.js';
+import type { SignalOptions } from './types/signals.js';
+import type { PackageResult } from './types/verdicts.js';
 
 export async function vetChanges(
   changes: Change[],
@@ -35,7 +31,9 @@ export async function vetChanges(
         signals = computeSignals(change, packument, opts);
         // A BLOCK stands whatever the files hold: they are not read.
         const versions =
-          packument && decide(signals) !== 'block' ? contentVersions(change, packument) : undefined;
+          packument && decide(signals) !== 'block'
+            ? comparedVersions(change, packument)
+            : undefined;
         if (versions) {
           const after = await readContent(versions.next, stop.signal);
           const before =

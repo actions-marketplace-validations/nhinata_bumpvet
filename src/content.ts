@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
-import { messageWithCause } from './errors.js';
-import type { VersionManifest } from './types.js';
+import { messageWithCause } from './utils/errors.js';
+import type { Content, ReadContent } from './types/content.js';
+import { NO_TARBALL, type VersionManifest } from './types/registry.js';
 
 /**
  * Kinds of code each content signal looks for, each found by a pattern in a
@@ -34,18 +35,21 @@ export const LIMITS = {
   fileBytes: 128_000_000,
 };
 const MB = (n: number) => `${n / 1_000_000} MB`;
-
-/**
- * Each kind found in a release, with the first file it was found in; or why
- * the files were not read.
- */
-export type Content = { found: Map<string, string> } | { unread: string };
-
-/** Reads a version's files. Throws only when the registry cannot be reached. */
-export type ReadContent = (version: VersionManifest, signal?: AbortSignal) => Promise<Content>;
+const overUnpacked = (limits: typeof LIMITS) => `over ${MB(limits.unpackedBytes)} unpacked`;
+const overFiles = (limits: typeof LIMITS) => `over ${limits.files} files`;
 
 /** A release bumpvet does not read: over a limit, or in a form it does not understand. */
-class Unreadable extends Error {}
+export class Unreadable extends Error {}
+
+/**
+ * Throws Unreadable when one more file of `size` bytes, after `count` files
+ * of `unpacked` bytes in all, is over a limit.
+ */
+export function admitFile(count: number, unpacked: number, size: number, limits = LIMITS): void {
+  if (size > limits.fileBytes) throw new Unreadable(`a file over ${MB(limits.fileBytes)}`);
+  if (count >= limits.files) throw new Unreadable(overFiles(limits));
+  if (unpacked + size > limits.unpackedBytes) throw new Unreadable(overUnpacked(limits));
+}
 
 /** Kinds found in `files`, each with the first path (in tarball order) it is in. */
 export function kindsIn(files: Iterable<[string, Buffer]>): Map<string, string> {
@@ -75,12 +79,13 @@ export function readTarball(tgz: Buffer, limits = LIMITS): [string, Buffer][] {
       tar = gunzipSync(tgz, { maxOutputLength: limits.unpackedBytes });
     } catch (err) {
       if ((err as { code?: string }).code === 'ERR_BUFFER_TOO_LARGE')
-        throw new Unreadable(`over ${MB(limits.unpackedBytes)} unpacked`);
+        throw new Unreadable(overUnpacked(limits));
       throw new Unreadable('not a gzip file npm can read');
     }
   } else tar = tgz;
 
   const files: [string, Buffer][] = [];
+  let unpacked = 0;
   let longName: string | undefined;
   for (let at = 0; ;) {
     // npm reads an archive that ends after its last entry, without the zero blocks.
@@ -121,8 +126,8 @@ export function readTarball(tgz: Buffer, limits = LIMITS): [string, Buffer][] {
     const name = longName ?? (prefix ? `${prefix}/${field(0, 100)}` : field(0, 100));
     longName = undefined;
     if (type === '0' || type === '\0' || type === '7') {
-      if (size > limits.fileBytes) throw new Unreadable(`a file over ${MB(limits.fileBytes)}`);
-      if (files.length >= limits.files) throw new Unreadable(`over ${limits.files} files`);
+      admitFile(files.length, unpacked, size, limits);
+      unpacked += size;
       files.push([name.replace(/^[^/]+\//, ''), body]);
     } else if (!'125K'.includes(type)) {
       // Links (1, 2, K), directories (5); anything else is not something npm writes.
@@ -176,7 +181,7 @@ export function registryContent(
 
   return (m, signal) => {
     const url = m.dist?.tarball;
-    if (!url) return Promise.resolve({ unread: 'no tarball URL in the registry' });
+    if (!url) return Promise.resolve({ unread: NO_TARBALL });
     // With the hashes: a manifest that shares the URL but not the hash is checked on its own.
     const key = `${url} ${m.dist?.integrity} ${m.dist?.shasum}`;
     let p = cache.get(key);
@@ -186,9 +191,9 @@ export function registryContent(
         // the limits below still hold when it is too low.
         const declared = m.dist?.unpackedSize;
         if (declared !== undefined && declared > limits.unpackedBytes)
-          return { unread: `over ${MB(limits.unpackedBytes)} unpacked` };
+          return { unread: overUnpacked(limits) };
         if (m.dist?.fileCount !== undefined && m.dist.fileCount > limits.files)
-          return { unread: `over ${limits.files} files` };
+          return { unread: overFiles(limits) };
         await turn();
         try {
           const tgz = await download(fetchImpl, url, m, limits, signal);

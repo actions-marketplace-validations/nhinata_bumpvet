@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { kindsIn, LIMITS, readTarball, registryContent, type ReadContent } from '../src/content.js';
-import type { Change, VersionManifest } from '../src/types.js';
+import { kindsIn, LIMITS, readTarball, registryContent } from '../src/content.js';
 import { vetChanges } from '../src/vet.js';
 import { fakeContent, fakeRegistry, packument } from './helpers.js';
+import type { ReadContent } from '../src/types/content.js';
+import type { Change } from '../src/types/lockfile.js';
+import type { VersionManifest } from '../src/types/registry.js';
 
 /** One tar entry: a ustar header with its checksum, then the body padded to 512 bytes. */
 function entry(name: string, body: string | Buffer = '', type = '0', size?: number): Buffer {
@@ -56,7 +58,7 @@ describe('kindsIn', () => {
     expect(performance.now() - start).toBeLessThan(1000);
   });
 
-  // Each of these is in benign code that eval:content measured.
+  // Each of these is in benign code that the benign evaluation measured.
   it.each([
     ['a method named eval', 'parser.eval(x)'],
     ['an identifier ending in eval', 'safeEval(x)'],
@@ -222,6 +224,15 @@ describe('registryContent', () => {
     expect(await registryContent(serving(file).fetchImpl)(manifest({}))).toEqual({
       unread: 'no sha512 or sha1 hash in the registry',
     });
+  });
+
+  it('does not download a release whose manifest names no tarball', async () => {
+    const { calls, fetchImpl } = serving(file);
+    const noTarball = { version: '1.0.0', dist: { integrity: sha512 } };
+    expect(await registryContent(fetchImpl)(noTarball)).toEqual({
+      unread: 'no tarball URL in the registry',
+    });
+    expect(calls).toHaveLength(0);
   });
   it('reads at most `concurrency` tarballs at a time', async () => {
     let open = 0;

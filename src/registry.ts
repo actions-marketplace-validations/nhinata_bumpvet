@@ -1,15 +1,18 @@
-import { messageWithCause } from './errors.js';
-import { isObject, str } from './json.js';
-import { INSTALL_HOOKS } from './signals.js';
-import type { Packument, VersionManifest } from './types.js';
+import { messageWithCause } from './utils/errors.js';
+import { isObject, str } from './utils/json.js';
+import {
+  INSTALL_HOOKS,
+  REGISTRY,
+  type FetchPackument,
+  type Packument,
+  type VersionManifest,
+} from './types/registry.js';
 
-export type FetchPackument = (name: string) => Promise<Packument | null>;
+/** Where the registry serves a package's packument: a scoped name keeps its `@` and encodes its `/`. */
+const packumentUrl = (name: string) => REGISTRY + name.replace('/', '%2f');
 
 /** Fetches full packuments from the public registry. Returns null for a package the registry does not have. */
-export function registryFetcher(
-  base = 'https://registry.npmjs.org/',
-  fetchImpl: typeof fetch = fetch,
-): FetchPackument {
+export function registryFetcher(fetchImpl: typeof fetch = fetch): FetchPackument {
   const cache = new Map<string, Promise<Packument | null>>();
   return (name) => {
     let p = cache.get(name);
@@ -17,7 +20,7 @@ export function registryFetcher(
       p = (async () => {
         let res: Response;
         try {
-          res = await fetchImpl(base + name.replace('/', '%2f'), {
+          res = await fetchImpl(packumentUrl(name), {
             headers: { accept: 'application/json' },
             signal: AbortSignal.timeout(60_000),
           });
