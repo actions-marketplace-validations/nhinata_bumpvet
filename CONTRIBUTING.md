@@ -130,6 +130,12 @@ can still encode the same rule: a comparison and a lookup key, for example.
 Before writing a rule, look for code that already encodes it; before changing
 one, find every place that uses it. If you are about to write a comment such
 as "as in X" or "keep in sync with Y", move the rule into one place instead.
+The same goes for values: a number such as a limit or a wait is defined once
+in the code, and values that follow from it are computed from it. DESIGN.md
+says why it was chosen; README.md links there rather than repeating it. Two
+things are shown in README.md too, for its readers: the verdict table, from
+DESIGN.md, and the share of ordinary updates that are `OK`, from
+eval/README.md. When either changes at its source, change README.md with it.
 
 **Shared definitions go in `src/types/`.** Types and constants that several
 modules use as common terms of a domain live in `src/types/<domain>.ts`, not
@@ -172,6 +178,10 @@ its tests go with it.
 - Check that a new or changed test can fail: break the code it covers, see it
   fail, restore the code.
 - Tests never touch the network. Use the fakes in `test/helpers.ts`.
+- `test/docs.test.ts` checks the lists users read in the documents: the
+  signals and their groups in DESIGN.md against the code, and the verdict table
+  in README.md against DESIGN.md's. Only such lists; prose is checked by
+  review.
 - `test/incidents.test.ts` replays real incidents. Say where each value comes
   from: the live registry, or a named public report. If a value is a guess,
   say so in the comment.

@@ -47,7 +47,9 @@ In CI, name an exact version and skip npx's install prompt
 change verdicts without a change in your repository. To run it from source,
 see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Exit codes: `0` nothing to block, `1` at least one `BLOCK`, `2` error.
+Exit codes: `0` nothing to block, `1` at least one `BLOCK`, `2` error. A
+failed registry request is retried before it is an error (see
+[DESIGN.md](DESIGN.md#decisions-and-the-numbers-behind-them)).
 
 bumpvet reads the metadata of each changed registry package from
 registry.npmjs.org.
@@ -91,12 +93,12 @@ jobs:
 
 ## How it decides
 
-| Signals                                                                                                                                                                                                                                                  | Verdict |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| the lockfile installs something other than the registry's release: its integrity differs from the registry's, or it has none and `resolved` is not the registry's tarball, or the entry moved off the registry, or the version is gone from the registry | BLOCK   |
-| a new or changed install script together with an unusual origin or a fresh release                                                                                                                                                                       | BLOCK   |
-| an unusual origin (new publisher, lost provenance, not from the registry), or a new or changed install script                                                                                                                                            | REVIEW  |
-| nothing, or only a fresh release                                                                                                                                                                                                                         | OK      |
+| Signals                                                                                                                                                                                                                                                                          | Verdict |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| any **tamper** signal: the lockfile installs something other than the registry's release (its integrity differs from the registry's, or it has none and `resolved` is not the registry's tarball, or the entry moved off the registry, or the version is gone from the registry) | BLOCK   |
+| a new or changed install script (**content**) together with an unusual origin (**origin**) or a fresh release (**timing**)                                                                                                                                                       | BLOCK   |
+| an unusual origin (**origin**: new publisher, lost provenance, not from the registry), or a new or changed install script (**content**)                                                                                                                                          | REVIEW  |
+| nothing, or only a fresh release (**timing**)                                                                                                                                                                                                                                    | OK      |
 
 The signals, the thresholds and the measurements behind them are in
 [DESIGN.md](DESIGN.md). How often bumpvet speaks up on ordinary updates is
