@@ -9,7 +9,8 @@ tend to get wrong.
    does not answer it. Propose it instead and wait for a decision.
 2. **Do not say "done" before the checks pass:** `npm run format:check`,
    `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`. If a change
-   can alter a verdict, also run `npm run eval` and report the numbers before
+   can alter a verdict, also run the evaluation as
+   [Evaluation](CONTRIBUTING.md#evaluation) says and report the numbers before
    and after.
 3. **Do not edit numbers by hand.** Figures in `eval/README.md` and
    `DESIGN.md` come from the evaluations in
@@ -22,14 +23,15 @@ tend to get wrong.
    tests.
 6. **Review code changes before opening the pull request.** Run a code review
    on any change to code, tests or CI, sort the findings as
-   [CONTRIBUTING.md](CONTRIBUTING.md#review-findings) says, and list them and
-   what was done in the pull request description. Documentation-only changes
-   need their facts checked against the code instead.
+   [CONTRIBUTING.md](CONTRIBUTING.md#review-findings) says, and describe them
+   as [Pull requests](CONTRIBUTING.md#pull-requests) says. Documentation-only
+   changes need their facts checked against the code instead.
 7. **Never fix only the line a finding points at.** Find the rule behind it,
    every place that uses that rule, and fix them together; check the fix
    against DESIGN.md and earlier decisions, and check what it changes in every
-   place that uses the rule, saying in the pull request what was checked.
-   Patching spot by spot is how one fix opens the next hole.
+   place that uses the rule ([Pull requests](CONTRIBUTING.md#pull-requests)
+   says how to describe it). Patching spot by spot is how one fix opens the
+   next hole.
 8. **Keep one rule in one place** ([Writing code](CONTRIBUTING.md#writing-code)).
    If you are about to write "as in X" in a comment, merge the two instead.
    Before adding a number or a rule, search the code, DESIGN.md and README.md
@@ -42,5 +44,4 @@ tend to get wrong.
 11. **Everything published states checkable facts**
     ([Pull requests](CONTRIBUTING.md#pull-requests)): documents and comments
     too, not only commit messages and pull request descriptions. Not how the
-    work went, save the review findings in the description (item 6), nor
-    anything not yet public.
+    work went, nor anything not yet public.
