@@ -74,7 +74,7 @@ jobs:
         with:
           fetch-depth: 2
           persist-credentials: false
-      - uses: nhinata/bumpvet@c130c82792161d188f117b9e7b62ee30e00a3456 # v0.7.0
+      - uses: nhinata/bumpvet@df189290ca70dfb7dce20486a6ecbc12c7417f93 # v0.7.1
 ```
 
 - On `pull_request` it compares `package-lock.json` in the merge commit GitHub
@@ -132,7 +132,8 @@ packages, **97.5% were OK**.
 ## When bumpvet says BLOCK or REVIEW
 
 Do not merge first and look later. What to check depends on the signals listed
-under the package.
+under the package. A package line without a verdict label has the same verdict
+and signals as the line above it.
 
 **BLOCK because of a tamper signal** (`integrity-mismatch`, `tarball-mismatch`,
 `source-changed`, `not-in-registry`): the lockfile installs something other
